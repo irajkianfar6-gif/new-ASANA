@@ -1,9 +1,9 @@
 {
   "index": {
     "path": "public/index.html",
-    "bytes": 10146474,
-    "sha256": "1f312f62a66268c96601a17277c36adcf1c7ef9b3507ea04f0d6d825e0b59a89",
-    "parts": 17
+    "bytes": 10224938,
+    "sha256": "ab95593065c2b617a07bbb305b864add503cf51272787c7d32aae23209e44e2b",
+    "parts": 15
   },
   "binaries": [
     {

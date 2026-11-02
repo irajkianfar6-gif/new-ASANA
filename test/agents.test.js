@@ -171,6 +171,22 @@ const rpc=(m,params,tok,id=1,p='/mcp')=>api(p,{method:'POST',body:{jsonrpc:'2.0'
   t('skills: execute batna-freight-negotiation returns BATNA matrix + counter-offer',r.s===200&&r.j.ok===true&&r.j.result&&r.j.result.batna&&r.j.result.batna.counterOfferUSD>0);
   r=await api('/api/agents/skills/opensanctions-maritime-compliance/execute',{method:'POST',body:{agent:'risk',args:{names:['IRISL','DP World'],imo:'9349576',cntr:'CSQU3054383'}}},T);
   t('skills: execute opensanctions-maritime-compliance validates IMO + ISO6346 + sanctions',r.s===200&&r.j.ok===true&&r.j.result.imoValidation.valid===true&&r.j.result.containerValidation.iso6346Valid===true);
+  console.log('— v1.20 agentic process automations (11 autonomous business workflows)');
+  r=await api('/api/agents/automations',{},T);
+  t('automations: overview returns 11 autonomous processes, 4 playbooks, and temporal vendor graph',r.s===200&&r.j.totalAutomations===11&&r.j.automations.length===11&&r.j.playbooks.length>=4&&r.j.vendorGraph.length>=6);
+  r=await api('/api/agents/automations/quote_to_shipment/run',{method:'POST',body:{}},T);
+  t('automations: quote_to_shipment computes HS, route, landed cost & creates shipment ref',r.s===200&&r.j.ok===true&&r.j.result.shipmentRef&&r.j.result.financials.clientQuoteUsd>0&&r.j.result.steps.length===5);
+  r=await api('/api/agents/automations/stateful_checkpoint_flow/run',{method:'POST',body:{input:{simulateHallucination:true,quotedUsd:2380}}},T);
+  const cpId=r.j.result&&r.j.result.checkpoints&&r.j.result.checkpoints[0]&&r.j.result.checkpoints[0].id;
+  t('automations: stateful_checkpoint_flow saves SQLite checkpoints & self-heals QA hallucination',r.s===200&&r.j.result.selfHealed===true&&r.j.result.checkpoints.length===3&&cpId>0);
+  r=await api('/api/agents/checkpoints/'+cpId+'/resume',{method:'POST',body:{}},T);
+  t('automations: checkpoint resume restores state and marks completed',r.s===200&&r.j.ok===true&&r.j.resumedFrom===cpId&&r.j.checkpoint.status==='completed');
+  r=await api('/api/agents/automations/swarm_agent_handoff/run',{method:'POST',body:{}},T);
+  t('automations: swarm_agent_handoff executes 5-step multi-agent chain',r.s===200&&r.j.result.chainLength===5&&r.j.result.handoffs.length===5);
+  r=await api('/api/agents/automations/four_way_doc_reconciliation/run',{method:'POST',body:{}},T);
+  t('automations: four_way_doc_reconciliation detects package/weight/Incoterm discrepancies',r.s===200&&r.j.result.discrepancyCount>=3&&r.j.result.status==='hold_amendment_required');
+  r=await api('/api/agents/automations/freight_bill_audit_guardrail/run',{method:'POST',body:{}},T);
+  t('automations: freight_bill_audit_guardrail flags overcharges & restores profit margin',r.s===200&&r.j.result.disputedOverchargeUsd===430&&r.j.result.marginAfterAuditPct>r.j.result.marginBeforeAuditPct);
   {process.env.IFA_DATA=fs.mkdtempSync(path.join(os.tmpdir(),'ifa-agu-'));const M=require('../server.js').p5;const ctx={actor:{role:'ops',username:'agent:risk'},steps:0};
    t('unit: policy — web-reading agent can never send',/اینترنت/.test(M.agPolicy({...M.AGENTS.risk,tools:[...M.AGENTS.risk.tools,'rfq_send']},M.TOOLS.rfq_send,{},ctx).deny||''));
    t('unit: policy — level 1 write needs approval, level 2 auto',M.agPolicy(M.AGENTS.risk,M.TOOLS.routes_set_status,{},ctx).approval===true&&M.agPolicy({...M.AGENTS.risk,id:'tracker',level:2},{...M.TOOLS.routes_set_status},{},{...ctx}).deny===undefined);
@@ -195,6 +211,7 @@ const rpc=(m,params,tok,id=1,p='/mcp')=>api(p,{method:'POST',body:{jsonrpc:'2.0'
     t('client: v15.20 live web data (Firecrawl + Exa) panel and autopilot stage embedded',['function wbShow(','function wbRt(','function wbNw(','function wbDoc(','APF.web=APH.web=','APTH.web=','/api/web/live','/api/web/parse','.wb-dlg{'].every(x=>H.includes(x)));
     t('client: assistant + autopilot + flows UI embedded (v15.10)',['function calcEval(','function asFab(','IFA.autopilot','function agFlows(',"['flow','فرایندهای تکرارپذیر']"].every(x=>H.includes(x)));
     t('client: Claude SKILL.md skills registry UI embedded',['function agSkills(','/api/agents/skills','AG_SKILL_SAMPLES','مهارت‌های کلاد (SKILL.md'].every(x=>H.includes(x)));
+    t('client: v1.20 Agentic Process Automations UI embedded',['function agAuto(','/api/agents/automations','اتوماسیون فرایندها ('].every(x=>H.includes(x)));
     t('client: embedded server.js matches shipped server.js',!!m&&Buffer.from(m[1],'base64').equals(fs.readFileSync(path.join(__dirname,'..','server.js'))))}
  }catch(e){fail++;console.error(e)}
  srv.kill('SIGTERM');smtp.close();feedS.close();llm.close();console.log(`\n${ok} passed, ${fail} failed`);fs.rmSync(dir,{recursive:true,force:true});process.exit(fail?1:0)})();

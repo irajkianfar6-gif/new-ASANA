@@ -163,6 +163,14 @@ const rpc=(m,params,tok,id=1,p='/mcp')=>api(p,{method:'POST',body:{jsonrpc:'2.0'
   r=await api('/api/flows',{method:'POST',body:{name:'bad',steps:[{type:'tool',tool:'web_fetch'}]}},T);t('flows: web_fetch rejected in flows',r.s===400);
   r=await api('/api/flows',{method:'POST',body:{template:'daily_brief'}},VIEW);t('flows: viewer cannot create',r.s===403);
   r=await api('/api/flows/'+G,{method:'DELETE'},T);t('flows: delete',r.s===200);
+  r=await api('/api/agents/skills',{},T);
+  t('skills: registry loads 16 SKILL.md skills across all 10 agents',r.s===200&&r.j.total===16&&Object.keys(r.j.byAgent||{}).length===10&&r.j.progressiveDisclosure.tokenSavingsPct>80);
+  r=await api('/api/agents/skills/xlsx-tariff-modeling',{},T);
+  t('skills: progressive disclosure loads full SKILL.md instructions',r.s===200&&r.j.id==='xlsx-tariff-modeling'&&r.j.instructions.length>100&&r.j.agents.includes('analyst'));
+  r=await api('/api/agents/skills/batna-freight-negotiation/execute',{method:'POST',body:{agent:'procurement',args:{pol:'Ningbo',pod:'Bandar Abbas',eq:'40HC',offerUSD:2480}}},T);
+  t('skills: execute batna-freight-negotiation returns BATNA matrix + counter-offer',r.s===200&&r.j.ok===true&&r.j.result&&r.j.result.batna&&r.j.result.batna.counterOfferUSD>0);
+  r=await api('/api/agents/skills/opensanctions-maritime-compliance/execute',{method:'POST',body:{agent:'risk',args:{names:['IRISL','DP World'],imo:'9349576',cntr:'CSQU3054383'}}},T);
+  t('skills: execute opensanctions-maritime-compliance validates IMO + ISO6346 + sanctions',r.s===200&&r.j.ok===true&&r.j.result.imoValidation.valid===true&&r.j.result.containerValidation.iso6346Valid===true);
   {process.env.IFA_DATA=fs.mkdtempSync(path.join(os.tmpdir(),'ifa-agu-'));const M=require('../server.js').p5;const ctx={actor:{role:'ops',username:'agent:risk'},steps:0};
    t('unit: policy — web-reading agent can never send',/اینترنت/.test(M.agPolicy({...M.AGENTS.risk,tools:[...M.AGENTS.risk.tools,'rfq_send']},M.TOOLS.rfq_send,{},ctx).deny||''));
    t('unit: policy — level 1 write needs approval, level 2 auto',M.agPolicy(M.AGENTS.risk,M.TOOLS.routes_set_status,{},ctx).approval===true&&M.agPolicy({...M.AGENTS.risk,id:'tracker',level:2},{...M.TOOLS.routes_set_status},{},{...ctx}).deny===undefined);
@@ -186,6 +194,7 @@ const rpc=(m,params,tok,id=1,p='/mcp')=>api(p,{method:'POST',body:{jsonrpc:'2.0'
     t('client: v15.21 web phase 2 (indices, road & border, Exa monitors, estimate) embedded',['function wbIx(','function wbRd(','function wbMon(','function wbEstRun(','/api/web/estimate','/api/web/monitors','/api/web/markets/refresh','.wb-est1{',"version:'15.2"].every(x=>H.includes(x)));
     t('client: v15.20 live web data (Firecrawl + Exa) panel and autopilot stage embedded',['function wbShow(','function wbRt(','function wbNw(','function wbDoc(','APF.web=APH.web=','APTH.web=','/api/web/live','/api/web/parse','.wb-dlg{'].every(x=>H.includes(x)));
     t('client: assistant + autopilot + flows UI embedded (v15.10)',['function calcEval(','function asFab(','IFA.autopilot','function agFlows(',"['flow','فرایندهای تکرارپذیر']"].every(x=>H.includes(x)));
+    t('client: Claude SKILL.md skills registry UI embedded',['function agSkills(','/api/agents/skills','AG_SKILL_SAMPLES','مهارت‌های کلاد (SKILL.md'].every(x=>H.includes(x)));
     t('client: embedded server.js matches shipped server.js',!!m&&Buffer.from(m[1],'base64').equals(fs.readFileSync(path.join(__dirname,'..','server.js'))))}
  }catch(e){fail++;console.error(e)}
  srv.kill('SIGTERM');smtp.close();feedS.close();llm.close();console.log(`\n${ok} passed, ${fail} failed`);fs.rmSync(dir,{recursive:true,force:true});process.exit(fail?1:0)})();

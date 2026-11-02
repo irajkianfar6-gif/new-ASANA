@@ -1,0 +1,288 @@
+/* End-to-end smoke test: boots the server on a temp data dir and exercises every core API. */
+'use strict';
+const {spawn}=require('node:child_process'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),zlib=require('node:zlib');
+const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ifa-')),PORT=18000+Math.floor(Math.random()*1000),B='http://127.0.0.1:'+PORT,PW='Test-Pass-123';
+/* fake SMTP server to verify e-mail delivery end-to-end (no network needed) */
+const net=require('node:net');const MAILS=[];const SMTP_PORT=PORT+1;
+const smtp=net.createServer(c=>{let data=false,buf='',cur={};c.write('220 fake ESMTP\r\n');c.on('data',d=>{buf+=d;let i;while((i=buf.indexOf('\r\n'))>=0){const l=buf.slice(0,i);buf=buf.slice(i+2);
+ if(data){if(l==='.'){data=false;MAILS.push(cur);cur={};c.write('250 queued\r\n')}else cur.body=(cur.body||'')+l+'\n';continue}
+ if(/^EHLO/i.test(l))c.write('250-fake\r\n250 AUTH LOGIN\r\n');else if(/^AUTH LOGIN/i.test(l))c.write('334 VXNlcm5hbWU6\r\n');else if(/^MAIL FROM/i.test(l))c.write('250 ok\r\n');else if(/^RCPT TO:<(.*)>/i.test(l)){cur.to=l.match(/<(.*)>/)[1];c.write('250 ok\r\n')}
+ else if(/^DATA/i.test(l)){data=true;c.write('354 go\r\n')}else if(/^QUIT/i.test(l)){c.write('221 bye\r\n');c.end()}else if(cur.authStep===undefined){cur.authStep=1;c.write('334 UGFzc3dvcmQ6\r\n')}else c.write('235 ok\r\n')}})}).listen(SMTP_PORT,'127.0.0.1');
+
+/* fake IMAP server (rate e-mail inbox) */
+const IMAP_PORT=PORT+2;const subj='=?UTF-8?B?'+Buffer.from('نرخ هفتگی شانگهای','utf8').toString('base64')+'?=';
+const RAW=['Message-ID: <rate-1@agent.cn>','From: "Sea Star" <ali@seastar.cn>','Subject: '+subj,'Date: Mon, 5 Oct 2026 10:00:00 +0000','MIME-Version: 1.0','Content-Type: multipart/mixed; boundary="BB"','','--BB','Content-Type: text/plain; charset=utf-8','Content-Transfer-Encoding: quoted-printable','','Shanghai - Bandar Abbas 40HQ USD 1,9=','50 all in, valid till 31 Oct','--BB','Content-Type: text/csv; name="rates.csv"','Content-Disposition: attachment; filename="rates.csv"','Content-Transfer-Encoding: base64','',Buffer.from('POL,POD,40HC\nNingbo,Bandar Abbas,1880\n').toString('base64'),'--BB--',''].join('\r\n');
+const imapS=net.createServer(c=>{c.write('* OK fake IMAP ready\r\n');let buf='';c.on('data',d=>{buf+=d;let i;while((i=buf.indexOf('\r\n'))>=0){const l=buf.slice(0,i);buf=buf.slice(i+2);const [tag,...r]=l.split(' ');const cmd=r.join(' ');
+ if(/^LOGIN/i.test(cmd))c.write(/"imapuser" "imappass"/.test(cmd)?tag+' OK logged in\r\n':tag+' NO bad\r\n');else if(/^SELECT/i.test(cmd))c.write('* 1 EXISTS\r\n'+tag+' OK [READ-WRITE] done\r\n');
+ else if(/^UID SEARCH/i.test(cmd))c.write('* SEARCH 7\r\n'+tag+' OK search\r\n');else if(/^UID FETCH 7/i.test(cmd))c.write('* 1 FETCH (UID 7 BODY[] {'+Buffer.byteLength(RAW)+'}\r\n'+RAW+')\r\n'+tag+' OK fetch\r\n');
+ else if(/^UID STORE/i.test(cmd))c.write(tag+' OK store\r\n');else if(/^LOGOUT/i.test(cmd)){c.write('* BYE\r\n'+tag+' OK\r\n');c.end()}else c.write(tag+' BAD\r\n')}})}).listen(IMAP_PORT,'127.0.0.1');
+/* fake news feed (domestic tariff watch) */
+const http=require('node:http');const FEED_PORT=PORT+3,FB='http://127.0.0.1:'+FEED_PORT;
+const FEED=`<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>test</title>
+<item><title>افزایش ۲۶.۵ درصدی شاخص تن-کیلومتر از ۱۵ خرداد اجرایی می‌شود</title><link>${FB}/a1</link><description><![CDATA[سازمان راهداری اعلام کرد نرخ حمل کالا افزایش می‌یابد]]></description><pubDate>Wed, 03 Jun 2026 05:54:00 GMT</pubDate></item>
+<item><title>نرخ جدید حق توقف ناوگان حمل‌ونقل کالا ابلاغ شد</title><link>${FB}/a2</link><description>کامیون‌ها</description><pubDate>Sat, 01 Aug 2026 08:00:00 GMT</pubDate></item>
+<item><title>کاظمیان: پهنه‌های بلندمرتبه‌سازی گرگان به‌زودی ابلاغ می‌شود</title><link>${FB}/a3</link><description>شهرسازی</description></item></channel></rss>`;
+const ART={'/a1':'<html><body><script>var x=1</script><article><p>سازمان راهداری اعلام کرد: نرخ شاخص تن-کیلومتر در بخش حمل‌ونقل جاده‌ای کالا از روز جمعه ۱۵ خرداد ۱۴۰۵ به میزان ۲۶.۵ درصد افزایش خواهد یافت.</p><p>نرخ شاخص تن-کیلومتر که پیش از این ۱۳ هزار و ۱۹۰ ریال بود، از زمان اجرای مصوبه جدید به ۱۶ هزار و ۶۸۰ ریال معادل ۲۶.۵ درصد افزایش خواهد رسید.</p></article></body></html>',
+ '/a2':'<html><body><p>طبق مصوبه جدید، نرخ حق توقف کامیون‌ها از اول مرداد ۱۴۰۵ اعلام شد. کامیون تک: ۷,۱۰۸,۱۰۰ تومان. کامیون جفت، تریلی و کمرشکن: ۸,۴۰۳,۳۰۰ تومان.</p></body></html>'};
+/* fake Firecrawl + Exa APIs (web data, v15.20) */
+const WBM={scr:0,auth:[]};function wbMock(q,r){let b='';q.on('data',c=>b+=c);q.on('end',()=>{WBM.auth.push(q.headers.authorization||q.headers['x-api-key']||'');const J=o=>{r.writeHead(200,{'Content-Type':'application/json'});r.end(JSON.stringify(o))};let x={};try{x=JSON.parse(b)}catch(e){}
+ const OS=x.outputSchema&&x.outputSchema.properties||{};const td=n=>new Date(Date.now()+n*864e5).toISOString().slice(0,10);
+ if(q.url==='/exa/search'&&OS.calls)return J({results:[{url:'https://vessels.example.com/msc-test',title:'MSC TEST schedule'}],output:{content:{vessel:'MSC TEST',carrier:'MSC',calls:[{port:'Shanghai (CNSHA)',eta:td(4),etd:td(5),status:'delayed'},{port:'Bandar Abbas (IRBND)',eta:td(22),status:'scheduled'}],reason:'Port congestion at Shanghai'},grounding:[{field:'calls',citations:[{url:'https://vessels.example.com/msc-test',title:'MSC TEST schedule'}],confidence:'medium'}]},costDollars:{total:0.012}});
+ if(q.url==='/exa/search'&&OS.sanctioned)return J({results:[],output:{content:{entity:'Shady Shipping Co',country:'AE',sanctioned:/shady/i.test(x.query),designations:/shady/i.test(x.query)?[{list:'OFAC SDN',program:'IRAN'}]:[],adverse:[],summary:'Designated by OFAC.'},grounding:[{field:'sanctioned',citations:[{url:'https://ofac.example.gov/sdn/1',title:'SDN entry'}],confidence:'high'}]},costDollars:{total:0.012}});
+ if(q.url==='/exa/search'&&OS.companies)return J({results:[],output:{content:{companies:[{name:'Known Partner Co',website:'knownpartner.example.com',country:'China',email:'known@partner.example.com',services:['FCL']},{name:'New Wave Forwarding',website:'https://newwave.example.com/about',country:'China',city:'Ningbo',email:'Sales: sales@newwave.example.com',phone:'+86 1',services:['FCL','LCL'],certifications:['WCA']},{name:'No Source Ltd'}]},grounding:[{field:'companies[0].name',citations:[{url:'https://knownpartner.example.com/iran',title:'x'}]},{field:'companies[1].name',citations:[{url:'https://newwave.example.com/iran',title:'y'}],confidence:'high'}]},costDollars:{total:0.012}});
+ if(q.url==='/exa/search'&&OS.answer)return J({results:[],output:{content:{answer:'کریدور ریلی فعال است.',findings:[{point:'زمان حمل',detail:'۱۴ روز'}],figures:[],caveats:''},grounding:[{field:'answer',citations:[{url:'https://rail.example.com/a',title:'Rail'}],confidence:'high'}]},costDollars:{total:0.03}});
+ if(q.url==='/fc/v2/map')return J({success:true,links:[{url:'https://forwarder.example.com/about-us'},{url:'https://forwarder.example.com/contact'},{url:'https://other.example.net/about'},{url:'https://forwarder.example.com/blog/post-1'}]});
+ if(q.url==='/fc/v2/agent'&&q.method==='POST'){WBM.agent=x;return J({success:true,id:'ag1'})}
+ if(q.url==='/fc/v2/agent/ag1')return J({success:true,status:'completed',creditsUsed:120,data:{answer:'Firecrawl answer',findings:[{point:'p1'}],sources:['https://src.example.com/1']}});
+ if(q.url==='/exa/monitors'&&q.method==='POST'){WBM.mon=x;return J({id:'mon_test1',name:x.name,status:'active',webhookSecret:'whsec_test_123'})}
+ if(q.url==='/exa/monitors/mon_test1/trigger')return J({triggered:true});if(q.url==='/exa/monitors/mon_test1'&&q.method==='DELETE')return J({id:'mon_test1'});
+ if(q.url.startsWith('/exa/monitors/mon_test1/runs'))return J({data:[{id:'run_poll1',monitorId:'mon_test1',status:'completed',output:{results:[{url:'https://news.example.com/rajaee-queue',title:'Shahid Rajaee port congestion: vessels waiting 4 days',publishedDate:'2026-10-11 00:00:00.000000000'}],content:'Port open; congestion and delays reported.',grounding:[]}}]});
+ if(q.url==='/exa/search'&&x.outputSchema&&x.outputSchema.properties&&x.outputSchema.properties.low)return J({results:[{url:'https://rates.example.com/nsa-chb',title:'Lane report'}],output:{content:{low:1800,high:2400,typical:2100,transitDays:9,basis:'Published comparable lane quotes',asOf:new Date().toISOString().slice(0,10),surcharges:[{name:'BAF',usd:150}]},grounding:[{field:'typical',citations:[{url:'https://rates.example.com/nsa-chb',title:'Lane report'}],confidence:'medium'}]},costDollars:{total:0.012}});
+ if(q.url==='/exa/search'&&x.outputSchema&&x.outputSchema.properties&&x.outputSchema.properties.quotes)return J({results:[],output:{content:{quotes:[{symbol:'EUR/USD',value:1.12,asOf:new Date().toISOString().slice(0,10)},{symbol:'USDIRR',value:95000},{symbol:'BRENT',value:9999},{symbol:'XAU',value:1}]},grounding:[{field:'quotes[0].value',citations:[{url:'https://fx.example.com/eurusd',title:'FX'}],confidence:'high'}]},costDollars:{total:0.012}});
+ if(q.url==='/exa/search'){if(x.outputSchema)return J({results:[{url:'https://rates.example.com/sha-bnd',title:'Rate page'}],output:{content:{rates:[{origin:'Shanghai',destination:'Bandar Abbas',equipment:"40' High Cube",usd:2450,validUntil:'2099-01-01',asOf:new Date().toISOString().slice(0,10),source:'Rate page'}]},grounding:[{field:'rates[0].usd',citations:[{url:'https://rates.example.com/sha-bnd',title:'Rate page'}],confidence:'high'}]},costDollars:{total:0.012}});
+  if(x.category==='news')return J({results:[{url:'https://news.example.com/a-'+encodeURIComponent(x.query).slice(0,30),title:'Missile attack on container ship near Strait of Hormuz',publishedDate:new Date().toISOString(),highlights:['Shipping halted after attack']},{url:'https://news.example.com/calm',title:'Port opens new berth',publishedDate:new Date().toISOString(),highlights:['New berth']}],costDollars:{total:0.007}});
+  return J({results:[{url:'https://example.com',title:'x'}],costDollars:{total:0.004}})}
+ if(q.url==='/fc/v2/scrape'){const f=(x.formats||[])[0];const FS=f&&f.schema&&f.schema.properties||{};
+  if(FS.events){WBM.trk=(WBM.trk||0)+1;const ev=[{date:'2026-10-01 10:00',location:'Shanghai',event:'Gate in full'},{date:'2026-10-03 08:00',location:'Shanghai',event:'Loaded on vessel',vessel:'MSC TEST'}];if(WBM.trk>1)ev.push({date:'2026-10-20 06:00',location:'Jebel Ali',event:'Discharged (transshipment)'});return J({success:true,data:{json:{container:'MSCU1234567',eta:'2026-10-28',events:ev},metadata:{creditsUsed:5,statusCode:200}}})}
+  if(FS.offices){WBM.prof=(WBM.prof||[]);WBM.prof.push(x.url);return J({success:true,data:{json:{name:'Forwarder Example',services:['Sea Freight','Customs'],offices:[{city:'Ningbo',country:'China',address:'Not specified'},{city:'ningbo',country:'China'}],certifications:/about/.test(x.url)?['NVOCC 123']:[],emails:/contact/.test(x.url)?['info@forwarder.example.com']:[]},metadata:{creditsUsed:5,statusCode:200}}})}
+if(f&&f.type==='json'&&f.schema&&f.schema.properties&&f.schema.properties.composite){WBM.ix=(WBM.ix||0)+1;const d=new Date(Date.now()-(WBM.ix>2?0:7)*864e5).toISOString().slice(0,10);return J({success:true,data:{json:{asOf:d,composite:WBM.ix>2?5000:4351,routes:[{route:'Shanghai – Rotterdam',value:3337,changePct:-2},{route:'FBX11 China - N. Europe',value:3260,changePct:0}]},metadata:{creditsUsed:5,statusCode:200}}})}
+  if(f&&f.type==='json')return J({success:true,data:{json:{rates:[{origin:'Shanghai',destination:'Bandar Abbas',equipment:'20GP',usd:1500}]},metadata:{creditsUsed:5,statusCode:200,title:'Cogo'}}});
+  WBM.scr++;const L=['بخشنامهٔ شمارهٔ ۱۲ دربارهٔ ترخیص کالاهای اساسی از گمرکات کشور','اطلاعیهٔ ساعات کاری گمرک بندر شهید رجایی در ایام تعطیل'];if(WBM.scr>1)L.push('بخشنامهٔ جدید: ممنوعیت واردات لوازم خانگی کامل از اول آبان ابلاغ شد');return J({success:true,data:{markdown:'# بخشنامه‌ها\n\n'+L.join('\n\n'),metadata:{creditsUsed:1,statusCode:200}}})}
+ if(q.url==='/fc/v2/parse'){if(!/multipart\/form-data/.test(q.headers['content-type']||'')||!b.includes('invoice.pdf'))return J({success:false,error:'bad upload'});return J({success:true,data:{markdown:'INVOICE Sea Star',json:{vendor:'Sea Star',currency:'USD',invoiceNo:'SS-1',lines:[{label:'Ocean Freight 1x40HC',amount:2000},{label:'THC Origin',amount:150},{label:'Total',amount:2150}]},metadata:{creditsUsed:2}}})}
+ r.writeHead(404);r.end('{}')})}
+const feedS=http.createServer((q,r)=>{if(q.url.startsWith('/fc/')||q.url.startsWith('/exa/'))return wbMock(q,r);if(q.url==='/rss.xml'){r.writeHead(200,{'Content-Type':'application/rss+xml; charset=utf-8'});r.end(FEED)}else if(ART[q.url]){r.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});r.end(ART[q.url])}else{r.writeHead(404);r.end()}}).listen(FEED_PORT,'127.0.0.1');
+const LIVE=process.env.IFA_TEST_LIVE==='1';
+const srv=spawn(process.execPath,['--experimental-sqlite','--no-warnings',path.join(__dirname,'..','server.js')],{env:{...process.env,IFA_PORT:PORT,IFA_ENV_FILE:'',IFA_FIRECRAWL_BASE:FB+'/fc',IFA_EXA_BASE:FB+'/exa',IFA_FIRECRAWL_KEY:'fc-test-key-123456',IFA_EXA_KEY:'exa-test-key-123456',IFA_EXA_WEBHOOK_URL:'https://hooks.example.org/api/web/hook/exa',IFA_WEB_AUTO:'0',IFA_WEB_OFF:'',IFA_HOST:'127.0.0.1',IFA_DATA:dir,IFA_ADMIN_PASS:PW,IFA_SMTP_HOST:'127.0.0.1',IFA_SMTP_PORT:SMTP_PORT,IFA_SMTP_SECURE:'0',IFA_SMTP_USER:'u',IFA_SMTP_PASS:'p',IFA_SMTP_FROM:'atlas@example.ir',IFA_SMTP_NOTLS:'1',IFA_IMAP_HOST:'127.0.0.1',IFA_IMAP_PORT:IMAP_PORT,IFA_IMAP_TLS:'0',IFA_IMAP_USER:'imapuser',IFA_IMAP_PASS:'imappass',IFA_DTW_FEEDS:FB+'/rss.xml',IFA_DTW_AUTO:'0',...(LIVE?{}:{IFA_LIVE_OFF:'weather,sanctions,holidays,market,ext',IFA_FX_MARKET:'none'})},stdio:['ignore','pipe','inherit']});
+let ok=0,fail=0;const t=(n,c)=>{if(c){ok++;console.log('  ✓',n)}else{fail++;console.log('  ✗',n)}};
+const api=async(p,o={},tok)=>{const r=await fetch(B+p,{method:o.method||'GET',headers:{'Content-Type':'application/json',...(tok?{Authorization:'Bearer '+tok}:{})},body:o.body?JSON.stringify(o.body):undefined});let j;const x=await r.text();try{j=JSON.parse(x)}catch(e){j=x}return {s:r.status,j,h:r.headers}};
+(async()=>{for(let i=0;i<50;i++){try{await fetch(B+'/api/health');break}catch(e){await new Promise(r=>setTimeout(r,200))}}
+ try{
+  let r=await api('/api/health');t('health',r.s===200&&r.j.ok);
+  r=await fetch(B+'/',{headers:{'Accept-Encoding':'br'}});const html=await r.text();t('app served ('+r.headers.get('content-encoding')+', '+r.headers.get('content-length')+' B)',r.status===200&&html.includes('سامانه لجستیک آسانا')&&html.includes('Asana Logistics'));
+  const et=r.headers.get('etag');r=await fetch(B+'/',{headers:{'If-None-Match':et}});t('ETag 304',r.status===304);
+  for(const f of ['/sw.js','/manifest.webmanifest','/fonts/fonts.css','/icons/icon-192.png','/favicon.ico'])t('static '+f,(await fetch(B+f)).status===200);
+  t('path traversal blocked',(await fetch(B+'/..%2fserver.js')).status===404);
+  r=await api('/api/login',{method:'POST',body:{username:'admin',password:'bad'}});t('bad login 401',r.s===401);
+  r=await api('/api/login',{method:'POST',body:{username:'admin',password:PW}});const T=r.j.token;t('admin login',r.s===200&&!!T);
+  t('auth required',(await api('/api/me')).s===401);
+  {const h=(await api('/api/health')).j;t('open auth mode advertised',h.auth==='open'&&h.openScope==='lan');
+   const D='dev_TEST_abcdefghijklmn';let o=await api('/api/auth/open',{method:'POST',body:{device:D,label:'Chrome/Linux'}});t('open connect without password',o.s===200&&!!o.j.token&&o.j.user.role==='admin'&&o.j.user.username.startsWith('dev-'));
+   const o2=await api('/api/auth/open',{method:'POST',body:{device:D}});t('same device → same identity',o2.j.user.id===o.j.user.id);
+   const o3=await api('/api/auth/open',{method:'POST',body:{device:'dev_OTHER_abcdefghijklm'}});t('other device → separate identity',o3.s===200&&o3.j.user.id!==o.j.user.id);
+   t('open token works',(await api('/api/me',{},o.j.token)).s===200);t('bad device id 400',(await api('/api/auth/open',{method:'POST',body:{device:'x'}})).s===400);
+   t('rename device',(await api('/api/me/name',{method:'PATCH',body:{name:'میز عملیات'}},o3.j.token)).j.user.name==='میز عملیات');
+   t('device password login refused',(await api('/api/login',{method:'POST',body:{username:o.j.user.username,password:''}})).s===401);
+   await api('/api/users/'+o3.j.user.id,{method:'PATCH',body:{active:false}},T);t('disabled device blocked',(await api('/api/auth/open',{method:'POST',body:{device:'dev_OTHER_abcdefghijklm'}})).s===403);
+   t('spoofed public X-Forwarded-For blocked (lan scope)',(await fetch(B+'/api/auth/open',{method:'POST',headers:{'Content-Type':'application/json','X-Forwarded-For':'8.8.8.8'},body:JSON.stringify({device:D})})).status===403)}
+  r=await api('/api/users',{method:'POST',body:{username:'ops1',name:'Ops',role:'ops',password:'Ops-Pass-123'}},T);t('create user',r.s===200);
+  r=await api('/api/kv/ifa-ship',{method:'PUT',body:{value:JSON.stringify([{id:'S1',ref:'IFA-1'}]),base:0}},T);t('kv write v1',r.j.version===1);
+  r=await api('/api/kv/ifa-ship',{method:'PUT',body:{value:'[]',base:0}},T);t('kv conflict 409',r.s===409&&r.j.conflict);
+  r=await api('/api/kv?keys=ifa-ship,ifa-jobs',{},T);t('kv read',r.j['ifa-ship'].version===1&&r.j['ifa-jobs'].version===0);
+  const ops=(await api('/api/login',{method:'POST',body:{username:'ops1',password:'Ops-Pass-123'}})).j.token;
+  t('role ACL (ops cannot write ifa-pfx)',(await api('/api/kv/ifa-pfx',{method:'PUT',body:{value:'{}'}},ops)).s===403);
+  r=await api('/api/files',{method:'POST',body:{job:'J-1',name:'bl.txt',mime:'text/plain',data:Buffer.from('hello').toString('base64'),public:true}},T);t('file upload',r.s===200);
+  const fr=await fetch(B+'/api/files/'+r.j.id+'/raw',{headers:{Authorization:'Bearer '+T}});t('file download',(await fr.text())==='hello');
+  r=await api('/api/portal',{method:'POST',body:{job:'J-1',days:7}},T);t('portal link',r.s===200);
+  t('portal page',(await fetch(B+'/p/'+r.j.token)).status===200);
+  r=await api('/api/notify/rules',{method:'POST',body:{event:'*',channel:'log',target:'',template:'{{type}} {{ref}}'}},T);t('notify rule',r.s===200);
+  r=await api('/api/events',{method:'POST',body:{type:'shipment.created',data:{ref:'IFA-1'}}},T);t('event queued',r.j.queued===1);
+  r=await api('/api/einv/taxid',{method:'POST',body:{memoryId:'A1B2C3',serial:1}},T);t('moadian taxid (22 chars)',r.j.taxid&&r.j.taxid.length===22);
+  r=await api('/api/audit/verify',{},T);t('audit chain intact ('+r.j.checked+')',r.j.ok);
+  r=await api('/api/backup',{},T);t('backup',r.s===200&&r.j.kv.length>=1);
+  /* RFQ: online quotation links + e-mail + response flows into the shared «ifa-quotes» dataset */
+  r=await api('/api/rfq',{method:'POST',body:{title:'RFQ Shanghai → Tehran',text:'40HC x1, FOB Shanghai → Tehran',route:'TEST-ROUTE',model:7500,days:30,recipients:[{name:'Forwarder A',email:'a@fwd.test'}],send:true}},T);
+  t('rfq created + emailed',r.s===200&&r.j.invites.length===1&&r.j.emailed===1);const inv=r.j.invites[0].url.replace(/^https?:\/\/[^/]+/,'');
+  await new Promise(x=>setTimeout(x,1500));t('SMTP delivered with reply link',MAILS.length===1&&MAILS[0].to==='a@fwd.test'&&Buffer.from(MAILS[0].body.split('\n\n').slice(1).join('').replace(/\s/g,''),'base64').toString().includes('/q/'));
+  t('rfq form page',(await (await fetch(B+inv)).text()).includes('Request for Quotation'));
+  let fr2=await fetch(B+inv,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'price=7100&cur=USD&days=28&free=14&note=all-in'});t('vendor submits quote',fr2.status===200);
+  r=await api('/api/kv?keys=ifa-quotes',{},T);const qs=JSON.parse(r.j['ifa-quotes'].value||'[]');t('quote synced into ifa-quotes',qs.length===1&&qs[0].c===7100&&qs[0].route==='TEST-ROUTE'&&qs[0].p==='Forwarder A');
+  r=await api('/api/rfq',{},T);t('rfq list with response',r.j[0].responses.length===1);
+  r=await api('/api/live/status');t('live status',r.s===200&&r.j.config.smtp===true);
+  r=await api('/api/live/connectors');t('live connectors registry (v1.10)',r.s===200&&Array.isArray(r.j.connectors)&&r.j.connectors.some(c=>c.id==='hsOfficial')&&r.j.connectors.some(c=>c.id==='neshan'));
+  /* v1.11 actual costs + calibration */
+  t('actuals parse needs login',(await api('/api/actuals/parse',{method:'POST',body:{text:'Ocean freight 1850 USD'}})).s===401);
+  r=await api('/api/actuals/parse',{method:'POST',body:{text:'Ocean freight 1,850 USD\nTHC 4,200,000 تومان\nTotal 2,000 USD'}},T);t('actuals parse invoice text',r.s===200&&r.j.lines.length===2&&r.j.lines[0].comp==='freight'&&r.j.lines[1].cur==='IRR'&&r.j.lines[1].amt===42000000);
+  r=await api('/api/actuals',{method:'POST',body:{ref:'JOB-T',lane:'CN_SHA>IR_THR',mode:'sea',date:'2026-09-20',lines:[{comp:'freight',amt:2400,cur:'USD',est:2000},{comp:'thc',amt:260,cur:'USD',est:200}]}},T);t('actuals saved',r.s===200&&r.j.n===2);
+  r=await api('/api/actuals/calib?lane=CN_SHA%3EIR_THR&mode=sea',{},T);t('actuals calibration factor',r.s===200&&r.j.components.freight&&r.j.components.freight.factor>1&&r.j.components.freight.factor<1.2);
+  r=await api('/api/actuals/accuracy',{},T);t('actuals accuracy',r.s===200&&r.j.n===2&&r.j.byComp.freight.n===1);
+  /* v1.12 Iran data: customs tariff book + customs FX, PMO port tariffs, rate channels */
+  const TBC='ردیف تعرفه,شرح کالا,حقوق ورودی,SUQ,اولویت\n8429.5200,ماشین‌آلات با روبنای گردان,10,u,2\n8471.3000,رایانهٔ قابل حمل,۱۵,u,4\n';
+  t('tariff import needs login',(await api('/api/tariff/ir/import',{method:'POST',body:{text:TBC}})).s===401);
+  r=await api('/api/tariff/ir/import',{method:'POST',body:{text:TBC,label:'test'}},T);t('tariff book import (CSV, Persian digits)',r.s===200&&r.j.imported===2&&r.j.sample[1].duty===15&&r.j.sample[0].desc.includes('\u200c'));
+  r=await api('/api/tariff/ir?hs=84295200',{},T);t('tariff lookup exact',r.s===200&&r.j.result.match==='exact'&&r.j.result.duty===10);
+  r=await api('/api/tariff/ir?hs=847130',{},T);t('tariff lookup by 6-digit prefix',r.j.result&&r.j.result.hs==='84713000');
+  r=await api('/api/tariff/fx',{method:'PUT',body:{rates:{USD:285000},vat:10,hl:1}},T);t('customs FX saved',r.s===200&&r.j.rates.USD===285000);
+  r=await api('/api/tariff/ir/calc',{method:'POST',body:{hs:'84295200',cif:10000}},T);t('customs duty calc with book rate + customs FX',r.s===200&&r.j.rate===10&&r.j.customsValueIRR===2850000000&&r.j.dutyIRR===285000000&&r.j.vatIRR===313500000);
+  const PTC='بندر,خدمت,کانتینر,واحد,مبلغ,ارز,از روز,تا روز,روز آزاد\nSHR,تخلیه و بارگیری,40,کانتینر,38000000,IRR,,,\nSHR,انبارداری,40,روز,4000000,IRR,6,12,5\nSHR,انبارداری,40,روز,10000000,IRR,13,,5\n';
+  r=await api('/api/ports/tariff/import',{method:'POST',body:{text:PTC,label:'test'}},T);t('port tariff import (+ storage tiers synced)',r.s===200&&r.j.imported===3&&r.j.ddSynced===1);
+  r=await api('/api/ports/tariff/calc',{method:'POST',body:{port:'IR_BND',eq:'40HC',qty:2,days:15}},T);t('port charges calc (handling + tiered storage)',r.s===200&&r.j.totalIRR===2*38000000+2*(7*4000000+3*10000000));
+  r=await api('/api/ratech/cfg',{method:'PUT',body:{sources:[{kind:'tg',handle:'https://t.me/s/test_rates',name:'test',trust:true,auto:true}]}},T);t('rate channel source saved',r.s===200&&r.j.sources[0].handle==='test_rates');
+  r=await api('/api/ratech/ingest',{method:'POST',body:{source:r.j.sources[0].id,text:'شانگهای به بندرعباس 40HC 2450 دلار'}},T);t('channel message → rate auto-added',r.s===200&&r.j.auto===1&&r.j.items[0].amt===2450);
+  r=await api('/api/ratech/ingest',{method:'POST',body:{text:'Qingdao - Bandar Abbas 40HC USD 2600'}},T);t('untrusted message queued for review',r.j.pending===1);
+  r=await api('/api/ratech/items/'+r.j.items[0].id,{method:'POST',body:{action:'approve'}},T);t('queued rate approved',r.s===200&&r.j.status==='approved');
+  r=await api('/api/ap/runs',{method:'POST',body:{lane:'CN_SHA>IR_THR',name:'شانگهای ← تهران',route:'r1',mode:'instant',score:72,verdict:'ok',dur:6,st:{intake:{st:'ok',ms:40},route:{st:'ok',ms:300},dd:{st:'skip'},tariff:{st:'warn',note:'مهلت'}},vals:[{k:'land',label:'L',value:'$1',p:{src:'model',conf:0.6,band:[1,2]}}],finds:[{k:'risk',id:'top',sev:'hi',t:'x'}],dec:{verdict:'v',rec:{name:'#1 rail',cost:40000,days:22,risk:26},alts:[{name:'#2 sea',cost:41000,days:30,risk:37}],risks:['a','b'],conf:0.62,band:[1,2,3]},timeouts:1}},T);t('autopilot run report stored',r.s===200&&r.j.id>0);
+  const apId=r.j.id;r=await api('/api/ap/runs?lane=CN_SHA>IR_THR',{},T);t('autopilot runs listed with decision',r.s===200&&r.j.runs.length>=1&&r.j.runs[0].decision.rec.name==='#1 rail'&&r.j.runs[0].ok===2&&r.j.runs[0].warn===1&&r.j.runs[0].hi===1);
+  r=await api('/api/ap/run?id='+apId,{},T);t('autopilot run detail (stages + provenance)',r.s===200&&r.j.stages.route.ms===300&&r.j.vals[0].p.conf===0.6);
+  r=await api('/api/ap/stats',{},T);t('autopilot stats (stage warn %, timeouts)',r.s===200&&r.j.runs>=1&&r.j.timeouts>=1&&r.j.stages.tariff.warnPct===100);
+  r=await api('/api/ap/runs',{method:'POST',body:{name:'x'}},T);t('autopilot run without lane rejected',r.s===400);
+  r=await api('/api/ap/ckpt',{method:'PUT',body:{lane:'CN_SHA>IR_THR',st:{intake:'ok'},vals:[]}},T);t('autopilot checkpoint saved',r.s===200);
+  r=await api('/api/ap/ckpt',{},T);t('autopilot checkpoint restored',r.s===200&&r.j.ck&&r.j.ck.st.intake==='ok');
+  r=await api('/api/ap/ckpt',{method:'DELETE'},T);r=await api('/api/ap/ckpt',{},T);t('autopilot checkpoint cleared',r.s===200&&r.j.ck===null);
+  r=await api('/api/ap/runs',{});t('autopilot runs need auth',r.s===401);
+  r=await api('/api/ap/intake',{method:'POST',body:{text:'۲ کانتینر از شانگهای به مشهد'}},T);t('plan intake without model is honest',r.s===200&&r.j.llm===false);
+  r=await api('/api/ap/intake',{method:'POST',body:{text:''}},T);t('plan intake empty rejected',r.s===400);
+  r=await api('/api/ap/actions',{method:'POST',body:{run:1,name:'x',items:[{kind:'rfq',title:'RFQ'},{kind:'watch',title:'W',payload:{lane:'CN_SHA>IR_THR',pol:'CNSHA',pod:'IRBND',eq:'40HC',maxDays:30,deadline:'2030-01-10'}},{kind:'bogus',title:'b'}]}},T);t('plan actions created (invalid kind dropped)',r.s===200&&r.j.ids.length===2);
+  const [aR,aW]=r.j.ids;r=await api('/api/ap/actions?status=pending',{},T);t('plan actions listed pending',r.s===200&&r.j.actions.filter(a=>a.id===aR||a.id===aW).length===2);
+  r=await api('/api/ap/actions/'+aR,{method:'POST',body:{decision:'reject'}},T);t('plan action rejected',r.s===200);
+  r=await api('/api/ap/actions/'+aR,{method:'POST',body:{decision:'approve'}},T);t('plan action double decision 409',r.s===409);
+  r=await api('/api/ap/actions/'+aW,{method:'POST',body:{decision:'approve'}},T);t('approving watch action creates watch',r.s===200&&r.j.watch&&r.j.watch.lane==='CN_SHA>IR_THR'&&r.j.watch.active);
+  const wId=r.j.watch.id;r=await api('/api/ap/watch',{method:'POST',body:{lane:'CN_SHA>IR_THR',eq:'40HC',deadline:'2030-01-10',maxDays:25}},T);t('duplicate watch merged',r.s===200&&r.j.watch.id===wId&&r.j.watch.maxDays===25);
+  r=await api('/api/ap/watch',{method:'POST',body:{name:'x'}},T);t('watch without lane rejected',r.s===400);
+  r=await api('/api/ap/watch/check',{method:'POST',body:{}},T);t('watch check runs',r.s===200&&Array.isArray(r.j.results));
+  r=await api('/api/ap/watch',{},T);t('watch listed',r.s===200&&r.j.watches.some(w=>w.id===wId&&w.active));
+  r=await api('/api/ap/watch/'+wId,{method:'DELETE'},T);r=await api('/api/ap/watch',{},T);t('watch stopped',r.j.watches.some(w=>w.id===wId&&!w.active));
+  r=await api('/api/ap/actions',{});t('plan actions need auth',r.s===401);
+  /* --- v15.20 web data (Firecrawl + Exa, mocked) --- */
+  r=await api('/api/web/status',{},T);t('web status: both configured, keys masked',r.s===200&&r.j.fc.configured&&r.j.exa.configured&&!JSON.stringify(r.j).includes('fc-test-key-123456')&&r.j.fc.from==='env');
+  r=await api('/api/web/status');t('web status needs auth',r.s===401);
+  r=await api('/api/web/rates/collect',{method:'POST',body:{pol:'',pod:'IRBND'}},T);t('web rates need port codes',r.s===400);
+  r=await api('/api/web/rates/collect',{method:'POST',body:{pol:'CNSHA',pod:'IRBND',polName:'Shanghai',podName:'Bandar Abbas',eq:'40HC'}},T);
+  t('web rates collected from Exa + Firecrawl, all pending, eq-matched median',r.s===200&&r.j.items.length>=2&&r.j.items.every(i=>i.status==='pending')&&r.j.median===2450&&r.j.items.some(i=>i.via==='Firecrawl'&&i.eq==='20GP'));
+  t('web API keys sent to providers',WBM.auth.includes('Bearer fc-test-key-123456')&&WBM.auth.includes('exa-test-key-123456'));
+  r=await api('/api/web/rates/collect',{method:'POST',body:{pol:'CNSHA',pod:'IRBND',eq:'40HC'}},T);t('web rates cached',r.s===200&&r.j.cached===true);
+  r=await api('/api/web/rates?status=pending',{},T);const wpend=r.j.items;t('web rates in approval inbox',r.s===200&&wpend.length>=2&&wpend.every(i=>/^web-/.test(i.src)));
+  r=await api('/api/ratech/items/'+wpend[0].id,{method:'POST',body:{action:'approve'}},T);t('web rate approved into rate bank',r.s===200);
+  r=await api('/api/web/risk/refresh',{method:'POST',body:{}},T);t('web risk news refreshed',r.s===200&&r.j.fresh>=2&&r.j.hi.length>=1);
+  r=await api('/api/web/news?kind=risk',{},T);t('web risk news listed with severity (critical first)',r.s===200&&r.j.items.length>=2&&r.j.items[0].sev==='hi');
+  r=await api('/api/web/sources',{method:'POST',body:{name:'x',url:'http://127.0.0.1/admin',kind:'customs'}},T);t('web source: local URL rejected',r.s===400);
+  r=await api('/api/web/sources',{method:'POST',body:{name:'بخشنامه‌ها',url:'https://customs.example.org/circulars',kind:'customs',every:12}},T);const wsid=r.j.id;t('web source added',r.s===200&&wsid>0);
+  r=await api('/api/web/sources/'+wsid+'/run',{method:'POST',body:{}},T);t('web page monitor baseline',r.s===200&&r.j.first===true);
+  r=await api('/api/web/sources/'+wsid+'/run',{method:'POST',body:{}},T);t('web page monitor detects new line',r.s===200&&r.j.changed&&r.j.added.length===1);
+  r=await api('/api/web/news?kind=customs',{},T);t('customs change recorded as news',r.s===200&&r.j.items.some(n=>/تغییر در/.test(n.title)&&n.sev==='hi'));
+  r=await api('/api/web/parse',{method:'POST',body:{name:'scan.jpg',data:Buffer.from('xxxxxxxxxxxxxxxxxxxxxxxx').toString('base64')}},T);t('web parse rejects images',r.s===415);
+  r=await api('/api/web/parse',{method:'POST',body:{name:'invoice.pdf',kind:'invoice',data:Buffer.from('%PDF-1.4 fake invoice content for test').toString('base64')}},T);
+  t('web parse invoice → cost lines (total excluded, components mapped)',r.s===200&&r.j.lines.length===2&&r.j.lines[0].comp==='freight'&&r.j.lines[1].comp==='thc'&&r.j.fields.vendor==='Sea Star');
+  r=await api('/api/web/live',{method:'POST',body:{pol:'CNSHA',pod:'IRBND',eq:'40HC',match:['hormuz']}},T);t('web live bundle for autopilot (incl. road news, market flags, index moves)',r.s===200&&r.j.on&&r.j.rates&&r.j.rates.median===2450&&r.j.risk.length>=1&&Array.isArray(r.j.customs)&&Array.isArray(r.j.road)&&Array.isArray(r.j.markets)&&Array.isArray(r.j.idx)&&!r.j.estimate);
+  r=await api('/api/web/config',{method:'PUT',body:{dayUSD:0.0001}},T);r=await api('/api/web/rates/collect',{method:'POST',body:{pol:'CNSHA',pod:'IRBND',eq:'40HC',force:true}},T);t('web daily budget enforced',r.s===429);
+  r=await api('/api/web/config',{method:'PUT',body:{dayUSD:3,allow:'cogoport.com, https://www.iranimpex.com/x'}},T);t('web config saved (domains normalised)',r.s===200&&r.j.status.cfg.allow.join()==='cogoport.com,iranimpex.com');
+  r=await api('/api/web/sources',{method:'POST',body:{name:'y',url:'https://other.example.net/',kind:'page'}},T);t('web allow-list enforced',r.s===403);await api('/api/web/config',{method:'PUT',body:{allow:''}},T);
+  r=await api('/api/web/keys',{method:'PUT',body:{fc:'bad key!'}},T);t('web key format validated',r.s===400);
+  r=await api('/api/web/status',{},T);t('web usage tracked per operation',r.s===200&&r.j.spent.month>0&&r.j.byOp.some(o=>o.op==='rates.exa')&&r.j.byOp.some(o=>o.op==='doc.parse'));
+  /* --- v15.21 web data phase 2 (mocked) --- */
+  r=await api('/api/web/rates/collect',{method:'POST',body:{pol:'CNSHA',pod:'IRBND',eq:'40HC',force:true}},T);t('web rates: two-source agreement reported',r.s===200&&r.j.agree&&r.j.agree.n>=1&&r.j.agree.ok===false&&Array.isArray(r.j.agree.domains));
+  r=await api('/api/web/index/refresh',{method:'POST',body:{force:true}},T);t('web index: WCI/FBX extracted via Firecrawl JSON',r.s===200&&r.j.items.length>=1&&r.j.items[0].lines.some(l=>l.k==='COMP'&&l.v===4351)&&r.j.items[0].lines.some(l=>l.k==='ROTTERDAM'));
+  r=await api('/api/web/index/refresh',{method:'POST',body:{force:true,series:'wci'}},T);t('web index: jump vs previous assessment detected (≥10%)',r.s===200&&r.j.items[0].jumps>=1&&r.j.items[0].lines.find(l=>l.k==='COMP').chg>14);
+  r=await api('/api/live/indices');t('web index written into index history (fallback)',r.s===200&&(r.j.hist['wci|COMP']||[]).length>=2);
+  r=await api('/api/web/index',{},T);t('web index list with latest values',r.s===200&&r.j.items.some(i=>i.series==='wci'&&i.line==='COMP'&&i.value===5000));
+  r=await api('/api/web/estimate',{method:'POST',body:{pol:'INNSA',pod:'IRCHB',eq:'40HC',polName:'Nhava Sheva',podName:'Chabahar'}},T);t('web estimate: grounded range for lane without rates',r.s===200&&r.j.ok&&r.j.low===1800&&r.j.high===2400&&r.j.typical===2100&&r.j.sources.length===1&&r.j.surcharges[0].usd===150);
+  r=await api('/api/web/estimate',{method:'POST',body:{pol:'INNSA',pod:'IRCHB',eq:'40HC'}},T);t('web estimate cached',r.s===200&&r.j.cached===true);
+  r=await api('/api/web/markets/refresh',{method:'POST',body:{}},T);t('web markets: second source parsed, toman→rial, out-of-range dropped',r.s===200&&r.j.rows.some(x=>x.k==='EURUSD'&&x.value===1.12&&x.url)&&r.j.rows.some(x=>x.k==='USDIRR'&&x.value===950000)&&!r.j.rows.some(x=>x.k==='BRENT'||x.k==='XAU'));
+  r=await api('/api/web/markets',{},T);t('web markets listed',r.s===200&&r.j.rows.length>=2);
+  r=await api('/api/web/road/refresh',{method:'POST',body:{force:true}},T);t('web road & border news refreshed (forced, de-duplicated)',r.s===200&&r.j.kind==='road'&&r.j.cached===0&&!r.j.errors.length);
+  r=await api('/api/web/news?kind=road&days=3',{},T);t('web road news listed',r.s===200&&r.j.items.length>=1);
+  r=await api('/api/web/monitors',{method:'POST',body:{name:'ازدحام رجایی',query:'Shahid Rajaee port congestion',kind:'port',period:'1d'}},T);const wmid=r.j.id;t('exa monitor created with webhook',r.s===200&&r.j.webhook===true&&WBM.mon&&WBM.mon.webhook.url==='https://hooks.example.org/api/web/hook/exa'&&WBM.mon.search.query==='Shahid Rajaee port congestion');
+  r=await api('/api/web/monitors',{},T);t('exa monitor listed, secret not exposed',r.s===200&&r.j.monitors.length===1&&!JSON.stringify(r.j).includes('whsec_test_123'));
+  {const raw=JSON.stringify({type:'monitor.run.completed',data:{id:'run_hook1',monitorId:'mon_test1',status:'completed',output:{results:[{url:'https://news.example.com/hormuz-closed',title:'Strait of Hormuz closed to shipping after attack',publishedDate:new Date().toISOString()}],content:'Shipping halted.'}}});const ts=Math.floor(Date.now()/1e3);
+   const sig=require('crypto').createHmac('sha256','whsec_test_123').update(ts+'.'+raw).digest('hex');
+   let x=await fetch(B+'/api/web/hook/exa',{method:'POST',headers:{'Content-Type':'application/json','Exa-Signature':'t='+ts+',v1='+'0'.repeat(64)},body:raw});t('exa webhook: bad signature rejected',x.status===401);
+   x=await fetch(B+'/api/web/hook/exa',{method:'POST',headers:{'Content-Type':'application/json','Exa-Signature':'t='+ts+',v1='+sig},body:raw});const xj=await x.json();t('exa webhook: signed run ingested as news',x.status===200&&xj.fresh===1)}
+  r=await api('/api/web/news?kind=port',{},T);t('monitor results stored as port news (critical)',r.s===200&&r.j.items.some(n=>/hormuz-closed/.test(n.url)&&n.sev==='hi'));
+  r=await api('/api/web/monitors/'+wmid+'/run',{method:'POST',body:{}},T);t('exa monitor triggered',r.s===200&&r.j.triggered);
+  r=await api('/api/web/monitors/'+wmid+'/poll',{method:'POST',body:{}},T);t('exa monitor polled (fallback without webhook)',r.s===200&&r.j.fresh===1);
+  r=await api('/api/web/monitors/'+wmid+'/poll',{method:'POST',body:{}},T);t('exa monitor poll de-duplicated',r.s===200&&r.j.dup===true);
+  r=await api('/api/ap/watch',{method:'POST',body:{lane:'CNSHA>IRBND',name:'شانگهای ← بندرعباس',pol:'CNSHA',pod:'IRBND',eq:'40HC'}},T);
+  r=await api('/api/web/watch/tick',{method:'POST',body:{}},T);t('web signals linked to autopilot watches',r.s===200&&r.j.watches.some(w=>w.signals.some(s=>s.kind==='web.news'))&&r.j.watches.some(w=>w.signals.some(s=>s.kind==='web.index')));
+  r=await api('/api/agents/tool/web_news',{method:'POST',body:{args:{kind:'port'}}},T);t('agent tool web_news (read, no cost)',r.s===200&&r.j.items.length>=1&&r.j.sources.length>=1);
+  r=await api('/api/agents/tool/exa_search',{method:'POST',body:{args:{q:'x'}}},T);t('agent web tools not callable directly (agent/MCP path only)',r.s===403);
+  r=await api('/api/web/monitors/'+wmid,{method:'DELETE'},T);t('exa monitor deleted',r.s===200);
+  /* --- v15.22 web data phase 3 (mocked) --- */
+  {r=await api('/api/kv?keys=ifa-bkg',{},T);const kb=r.j['ifa-bkg']||{};const BK=JSON.parse(kb.value||'[]');const etd=new Date(Date.now()+2*864e5).toISOString().slice(0,10);BK.unshift({id:'BKTEST1',no:'B1',carrier:'MSC',vessel:'MSC TEST',voy:'123E',pol:'CNSHA',pod:'IRBND',eq:'40HC',qty:1,etd,cy:'',st:'conf'});
+   r=await api('/api/kv/ifa-bkg',{method:'PUT',body:{value:JSON.stringify(BK),base:kb.version||0}},T);
+   r=await api('/api/web/vessel',{method:'POST',body:{bk:'BKTEST1'}},T);t('vessel: booking ETD vs web schedule → 3-day delay',r.s===200&&r.j.status==='delay'&&r.j.delay===3&&r.j.etd&&r.j.eta&&r.j.sources.length===1);
+   r=await api('/api/web/vessels',{},T);t('vessel checks listed with bookings',r.s===200&&r.j.items.some(v=>v.bk==='BKTEST1'&&v.status==='delay')&&r.j.bookings.some(b=>b.id==='BKTEST1'));
+   r=await api('/api/web/vessel',{method:'POST',body:{vessel:'x'}},T);t('vessel: name validated',r.s===400)}
+  r=await api('/api/web/track',{method:'POST',body:{ref:'MSCU1234567'}},T);t('tracking: needs a tracking source',r.s===412);
+  r=await api('/api/web/sources',{method:'POST',body:{name:'رهگیری نمونه',url:'https://track.example.com/c/{ref}',kind:'track'}},T);t('tracking source with {ref} template added',r.s===200);
+  r=await api('/api/web/track',{method:'POST',body:{ref:'mscu 1234567'}},T);t('tracking: events extracted from public page',r.s===200&&r.j.ref==='MSCU1234567'&&r.j.results[0].events.length===2&&r.j.results[0].first&&r.j.results[0].eta==='2026-10-28');
+  r=await api('/api/web/track',{method:'POST',body:{ref:'MSCU1234567'}},T);t('tracking: new event detected on re-check',r.s===200&&r.j.results[0].fresh===1);
+  r=await api('/api/web/party',{method:'POST',body:{name:'Shady Shipping Co',kind:'company',country:'AE'}},T);t('party card: web-cited designation → high risk',r.s===200&&r.j.risk==='high'&&r.j.web.sanctioned&&r.j.sources[0].url.includes('ofac')&&r.j.id>0);
+  r=await api('/api/web/party',{method:'POST',body:{name:'Clean Trading LLC',kind:'company'}},T);t('party card: no findings → low risk',r.s===200&&r.j.risk==='low'&&r.j.reasons.length===1);
+  r=await api('/api/web/parties',{},T);t('party history listed',r.s===200&&r.j.items.length>=2);
+  await api('/api/partners',{method:'POST',body:{name:'Known Partner Co',email:'known@partner.example.com',lanes:[]}},T);
+  r=await api('/api/web/forwarders/find',{method:'POST',body:{from:'China',to:'Bandar Abbas',mode:'sea'}},T);
+  t('forwarders: cited companies only, known partner flagged, email cleaned',r.s===200&&r.j.items.length===2&&r.j.items[0].known===true&&r.j.items[1].known===false&&r.j.items[1].email==='sales@newwave.example.com'&&r.j.items[1].website==='https://newwave.example.com');
+  {const id=r.j.items[1].id;r=await api('/api/web/forwarders/'+id+'/status',{method:'POST',body:{status:'invited'}},T);r=await api('/api/web/forwarders',{},T);t('forwarder candidate status saved',r.s===200&&r.j.items.some(c=>c.id===id&&c.status==='invited'))}
+  r=await api('/api/web/profile',{method:'POST',body:{url:'forwarder.example.com'}},T);
+  t('supplier profile: map → same-site key pages → merged facts',r.s===200&&r.j.pages.length===3&&!WBM.prof.some(u=>/other\.example|blog/.test(u))&&r.j.certifications.includes('NVOCC 123')&&r.j.emails[0]==='info@forwarder.example.com'&&r.j.offices.length===1&&r.j.offices[0].address==='');
+  r=await api('/api/web/research',{method:'POST',body:{q:'کوتاه'}},T);t('research: short question rejected',r.s===400);
+  r=await api('/api/web/research',{method:'POST',body:{q:'وضعیت کریدور ریلی چین به ایران چیست؟',engine:'exa'}},T);const rj1=r.j.id;
+  r=await api('/api/web/research',{method:'POST',body:{q:'Current transit conditions at Sarakhs border crossing?',engine:'fc'}},T);const rj2=r.j.id;await new Promise(z=>setTimeout(z,600));
+  r=await api('/api/web/research/'+rj2+'/poll',{method:'POST',body:{}},T);t('research (Firecrawl Agent): async job completed with credit cap',r.s===200&&r.j.status==='done'&&r.j.result.answer==='Firecrawl answer'&&r.j.sources[0].url==='https://src.example.com/1'&&WBM.agent&&WBM.agent.maxCredits===300);
+  r=await api('/api/web/research/'+rj1,{},T);t('research (Exa deep): answer, findings and citations',r.s===200&&r.j.status==='done'&&r.j.result.findings.length===1&&r.j.sources[0].url==='https://rail.example.com/a');
+  r=await api('/api/agents/tool/memory_search',{method:'POST',body:{args:{q:'کریدور ریلی'}}},T);t('research result saved to organisational memory',r.s===200&&JSON.stringify(r.j).includes('پژوهش وب'));
+  r=await api('/api/live/hs/verify?code=12');t('hs verify validates input',r.s===400||r.s===501);
+  r=await api('/api/live/matrix',{method:'POST',body:{points:[[35.69,51.39]]}});t('matrix validates input',r.s===400);
+  /* v15.4 market indices: endpoint + manual entry (offline) and parsers on fixtures */
+  r=await api('/api/live/indices');t('indices endpoint (sources listed)',r.s===200&&r.j.sources&&r.j.sources.ccfi&&r.j.sources.bunker&&typeof r.j.hist==='object');
+  t('manual index needs admin',(await api('/api/live/indices/manual',{method:'POST',body:{series:'ccfi',line:'PERSIAN_GULF_RED_SEA',date:'2026-09-24',value:4000}},ops)).s===403);
+  r=await api('/api/live/indices/manual',{method:'POST',body:{series:'ccfi',line:'PERSIAN_GULF_RED_SEA',date:'2026-09-24',value:4000}},T);await api('/api/live/indices/manual',{method:'POST',body:{series:'ccfi',line:'PERSIAN_GULF_RED_SEA',date:'2026-10-01',value:4200}},T);
+  r=await api('/api/live/indices');const hp=r.j.hist['ccfi|PERSIAN_GULF_RED_SEA']||[];t('manual index stored in history',hp.length===2&&hp[1][1]===4200);
+  t('manual index validates input',(await api('/api/live/indices/manual',{method:'POST',body:{series:'xx',line:'A',date:'bad',value:-1}},T)).s===400);
+  {process.env.IFA_DATA=fs.mkdtempSync(path.join(os.tmpdir(),'ifa-p-'));process.env.IFA_ADMIN_PASS=PW;const M=require('../server.js').market;
+   const sse=M.parseSSE({data:{currentDate:'2026-09-30',lastDate:'2026-09-24',lineDataList:[{properties:{lineName_EN:'PERSIAN GULF/RED SEA'},currentContent:'4068.55',lastContent:'3900.1'},{properties:{lineName_EN:'COMPOSITE INDEX'},currentContent:1923.93,lastContent:1917.68},{properties:{lineName_EN:'X'},currentContent:null}]}});
+   t('parser: CCFI (SSE JSON)',sse.date==='2026-09-30'&&sse.lines.length===2&&sse.lines[0].k==='PERSIAN_GULF_RED_SEA'&&sse.lines[0].v===4068.55&&sse.lines[0].n==='خلیج فارس/دریای سرخ');
+   const fbx=M.parseFBX(`<script>window.frProductIntroTickerData['x'] = [{"label":"FBX","value":"$3,343","change":"-1.11%"},{"label":"FBX11","value":"$3,260","change":"-3.44%"},{"label":"XSI","value":"$1"}];</script>`);
+   t('parser: Freightos FBX ticker',fbx.lines.length===2&&fbx.lines[1].k==='FBX11'&&fbx.lines[1].v===3260&&Math.abs(fbx.lines[1].prev-3376)<2);
+   const wci=M.parseWCI('<p>Our detailed assessment for Thursday, 01 Oct 2026 indicates the composite WCI decreased 2% to $4,434 per 40ft container.</p><p>Spot rates from Shanghai to Rotterdam fell 2% to $3,399 per 40ft and from Shanghai to New York rose 1% to $10,428 per 40ft.</p>');
+   t('parser: Drewry WCI commentary',wci.date==='2026-10-01'&&wci.lines.find(l=>l.k==='COMP').v===4434&&wci.lines.find(l=>l.k==='ROTTERDAM').v===3399&&wci.lines.find(l=>l.k==='NEW_YORK').prev===10325);
+   const bk=M.parseBunker('<table class="price-table VLSFO x"><tr><th>Date</th><th>Price</th></tr><tr class="row"><th class="date"><span class="day">F</span> Oct 2</th><td><span>951.50</span></td><td>-8.50</td></tr><tr><th><span class="day">Th</span> Oct 1</th><td>960.00</td></tr></table><table class="price-table MGO"><tr><th><span>F</span> Oct 2</th><td>1,663.50</td></tr></table>',2026);
+   t('parser: Ship & Bunker table',bk.VLSFO.length===2&&bk.VLSFO[1][0]==='2026-10-02'&&bk.VLSFO[1][1]===951.5&&bk.MGO[0][1]===1663.5)
+   {const C=['Iran','Turkey*','UAE','China','Kazakhstan','Germany','Russia','Pakistan','Iraq','Oman','India','Georgia','Armenia','Azerbaijan','Uzbekistan','Turkmenistan','Afghanistan','Belarus','Poland','Netherlands','Atlantis'];const html='<title>Diesel prices around the world,  28-Sep-2026 | X</title>'+C.map((c,i)=>`<a class='graph_outside_link'>${c}&nbsp;</a>`).join('')+C.map((c,i)=>`<div style="color: #000000;">${(0.5+i/10).toFixed(3)}</div>`).join('');
+    const D=M.parseDiesel(html);t('parser: diesel prices by country (USD/L)',D.date==='2026-09-28'&&D.lines.length===20&&D.lines[0].k==='IR'&&D.lines[1].k==='TR'&&D.lines[1].v===0.6&&!D.lines.some(l=>l.n==='Atlantis'))}}
+
+  /* v15.8 domestic tariff: official tonne-km index & tariff watch */
+  {r=await api('/api/domestic/tariff',{},T);t('domestic tariff: official index 16,680 rial (5 verified versions)',r.s===200&&r.j.current.tkm===16680&&r.j.current.from==='2026-06-05'&&r.j.versions.length===5);
+   r=await api('/api/domestic/watch/poll',{method:'POST'},T);t('tariff watch: feed polled, 2 relevant of 3 items',r.s===200&&r.j.checked===1&&r.j.new===2);
+   r=await api('/api/domestic/watch',{},T);const it=r.j.items||[];const tk=it.find(x=>x.kind==='tkm'),sp=it.find(x=>x.kind==='stop');
+   t('tariff watch: tonne-km 16,680 rial, +26.5%, effective 2026-06-05 extracted from article',tk&&tk.vals.tkm===16680&&tk.vals.pct===26.5&&tk.vals.eff==='2026-06-05');
+   t('tariff watch: detention amounts (toman→rial) extracted',sp&&sp.vals.amounts.includes(71081000)&&sp.vals.amounts.includes(84033000));
+   r=await api('/api/domestic/watch/poll',{method:'POST'},T);t('tariff watch: re-poll de-duplicated',r.j.new===0);
+   const today=new Date().toISOString().slice(0,10);r=await api('/api/domestic/watch/'+tk.id,{method:'POST',body:{status:'ok',tkm:17000,from:today}},T);t('tariff watch: approve → new index version',r.s===200&&r.j.applied&&r.j.applied.tkm===17000);
+   r=await api('/api/domestic/tariff',{},T);t('domestic tariff: approved version is current',r.j.current.tkm===17000&&r.j.versions.length===6);
+   r=await api('/api/domestic/watch/'+sp.id,{method:'POST',body:{status:'ok',stop:{sgl:71081000,dbl:84033000,from:'2026-08-01'}}},T);r=await api('/api/kv?keys=ifa-dtar',{},T);const kv=JSON.parse(r.j['ifa-dtar'].value);t('tariff watch: detention stored in shared kv ifa-dtar',kv.stop.dbl===84033000&&kv.v.length===1);
+   r=await api('/api/domestic/watch?status=new',{},T);t('tariff watch: no pending items after review',r.j.items.length===0)}
+  /* v15.7 phase 3: partner rate panel, weekly report, external quote refs, IMAP inbox */
+  {r=await api('/api/partners',{method:'POST',body:{name:'Sea Star Logistics',email:'rates@seastar.cn',lanes:[{mode:'sea',pol:'Shanghai',pod:'Bandar Abbas',eq:'40HC'},{mode:'sea',pol:'Ningbo',pod:'Jebel Ali',eq:'20DV'}]}},T);const PT=r.j.token;t('partner panel: invite created + e-mailed',r.s===200&&/\/r\//.test(r.j.url)&&r.j.emailed===true);
+   let h=await fetch(B+'/r/'+PT);let tx=await h.text();t('partner panel: public page lists lanes',h.status===200&&tx.includes('Shanghai → Bandar Abbas'));
+   t('partner panel: bad token 404',(await fetch(B+'/r/'+'x'.repeat(22))).status===404);
+   h=await fetch(B+'/r/'+PT,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({a0:'1850',c0:'USD',i0:'all-in',v0:'2026-12-01',d0:'18',xpol:'Qingdao',xpod:'Bandar Abbas',xmode:'sea',xeq:'40HC',ax:'1990',cx:'USD',ix:'base+baf'}).toString()});tx=await h.text();t('partner panel: submission accepted',h.status===200&&/2 نرخ ثبت شد/.test(tx));
+   r=await api('/api/partners/rates?status=new',{},T);const ids=r.j.map(x=>x.id);t('partner rates queued for review',r.s===200&&r.j.length===2&&r.j.some(x=>x.pol==='Qingdao'&&x.usd===1990));
+   r=await api('/api/partners/rates',{method:'POST',body:{ids,status:'ok'}},T);const kv=(await api('/api/kv?keys=ifa-rates',{},T)).j['ifa-rates'];const A=JSON.parse(kv.value||'[]');t('approved partner rates → shared rate bank (src partner)',r.j.added===2&&A.filter(x=>x.src==='partner'&&/^PR-/.test(x.id)).length===2);
+   r=await api('/api/partners',{},T);t('partners list with counts',r.j[0].n===2&&r.j[0].pending===0&&r.j[0].lanes.length===2);
+   await new Promise(r=>setTimeout(r,16500));t('partner invite e-mail delivered (SMTP)',MAILS.some(m=>m.to==='rates@seastar.cn'&&Buffer.from((m.body||'').split('\n\n').slice(1).join('').replace(/[^A-Za-z0-9+/=]/g,''),'base64').toString('utf8').includes('/r/'+PT)));}
+  {for(const [d,v] of [['2026-09-18',4200],['2026-09-25',4100],['2026-10-02',4000]])await api('/api/live/indices/manual',{method:'POST',body:{series:'ccfi',line:'PERSIAN_GULF_RED_SEA',date:d,value:v}},T);
+   r=await api('/api/reports/market',{},T);const pg=(r.j.rows||[]).find(x=>x.line==='PERSIAN_GULF_RED_SEA');t('weekly report: index rows with weekly change',r.s===200&&pg&&pg.value===4000&&pg.w===-2.44&&/CCFI خلیج فارس/.test(r.j.text));
+   t('weekly report: partner lane medians',r.j.lanes.some(l=>l.pol==='Shanghai'&&l.median===1850));
+   const hr=await fetch(B+'/api/reports/market?format=html&t='+T);const ht=await hr.text();t('weekly report: HTML version',hr.status===200&&/text\/html/.test(hr.headers.get('content-type'))&&ht.includes('گزارش هفتگی بازار حمل'));
+   await api('/api/notify/rules',{method:'POST',body:{event:'market.weekly',channel:'log',target:'-',template:'{{text}}'}},T);r=await api('/api/reports/market/send',{method:'POST'},T);const ob=(await api('/api/notify/outbox',{},T)).j;t('weekly report: sent via notification rules',r.j.queued>=1&&ob.some(o=>o.event==='market.weekly'&&/CCFI/.test(o.text)))}
+  {r=await api('/api/live/quote-ref?o=Shanghai&oc=CN&d=Bandar%20Abbas&dc=IR&eq=40HC',{},T);t('quote-ref: connectors respect config (offline)',r.s===200&&Array.isArray(r.j.providers)&&r.j.available.freightos===false);
+   const M=require('../server.js');const F=M.p3.parseFreightos({response:{estimatedFreightRates:{mode:{mode:'FCL',price:{min:{moneyAmount:{amount:1500,currency:'USD'}},max:{moneyAmount:{amount:1800,currency:'USD'}}},transitTimes:{unit:'days',min:20,max:30}},numQuotes:1}}});t('parser: Freightos estimator',F.length===1&&F[0].min===1500&&F[0].days[1]===30);
+   t('parser: RFC2047 + quoted-printable MIME',M.p3.rfc2047(subj)==='نرخ هفتگی شانگهای'&&M.p3.mailExtract(RAW).text.includes('USD 1,950'))}
+  {r=await api('/api/rates/inbox/poll',{method:'POST'},T);t('IMAP inbox: unseen mail fetched',r.s===200&&r.j.new===1);r=await api('/api/rates/inbox/poll',{method:'POST'},T);t('IMAP inbox: de-duplicated by Message-ID',r.j.new===0);
+   r=await api('/api/rates/inbox',{},T);const m=r.j[0];t('IMAP inbox: subject decoded + attachment listed',m&&m.subject==='نرخ هفتگی شانگهای'&&m.atts[0].name==='rates.csv');
+   r=await api('/api/rates/inbox/'+m.id,{},T);t('IMAP inbox: body + CSV attachment text',r.j.text.includes('Shanghai - Bandar Abbas 40HQ USD 1,950')&&r.j.atts[0].text.includes('Ningbo,Bandar Abbas,1880'));
+   await api('/api/rates/inbox/'+m.id,{method:'POST',body:{status:'done'}},T);t('IMAP inbox: mark processed',(await api('/api/rates/inbox',{},T)).j.length===0)}
+  if(LIVE){r=await api('/api/live/fx');t('live fx (official + market)',r.s===200&&r.j.rates.EUR>0);
+   r=await api('/api/live/roads');t('live road weather ('+(r.j.points||[]).length+' points)',r.s===200&&r.j.points.length>20);
+   r=await api('/api/live/matrix',{method:'POST',body:{points:[[35.69,51.39],[27.18,56.27]]}});t('live road distance Tehran→Bandar Abbas '+(r.j.km&&r.j.km[0][1])+' km',r.s===200&&r.j.km[0][1]>1000);
+   r=await api('/api/live/indices/refresh',{method:'POST'},T);const sr=r.j.series||{};t('live indices: '+Object.keys(sr).map(k=>k+' '+(sr[k].date||'')).join(', ')+(Object.keys(r.j.errors||{}).length?' · errors: '+Object.keys(r.j.errors).join(','):''),r.s===200&&sr.ccfi&&sr.ccfi.lines.some(l=>l.k==='PERSIAN_GULF_RED_SEA')&&Object.keys(sr).length>=3)}
+ }catch(e){fail++;console.error(e)}
+ {const h=fs.readFileSync(path.join(__dirname,'..','public','index.html'),'utf8');t('domestic tariff client embedded (v15.8)',['function dtCalc(','function rDomOld(','function dmCalc0(','get domestic(){return dtApi}',"'domestic.tariff':['",'function dtImp('].every(x=>h.includes(x))&&/const IFA=\{version:'15\.(?:[8-9]|[12]\d)(?:\.\d+)?'/.test(h));
+  const a=h.indexOf('const DTKT='),b=h.indexOf('const dtStore=');const dtK=new Function(h.slice(a,b)+';return dtK')();
+  t('official distance factors reproduce 1405 & 1404 tables',Math.abs(dtK(150)*16680/10-654300)<1&&Math.abs(dtK(1000)*16680/10-2069800)<1&&Math.abs(dtK(100)*11040/10-315450)/315450<.002&&dtK(1025)>dtK(1000)&&dtK(2100)>dtK(2000))}
+ {const h=fs.readFileSync(path.join(__dirname,'..','public','index.html'),'utf8');t('market module embedded',h.includes('function rMkt(')&&/const IFA=\{version:'15\.(?:[5-9]|[12]\d)(?:\.\d+)?'/.test(h)&&h.includes("{k:'mkt',"));t('phase-2 market tools embedded (surcharges, forecast, thresholds, D&D, land)',['function mkSurCalc(','function mkForecast(','function mkWatchRun(','function mkLand(','landed=function(C,src,P)',"'rate.threshold':["].every(x=>h.includes(x)));t('live O→D quote module embedded',h.includes('function rLq(')&&/const IFA=\{version:'15\.(?:[6-9]|[12]\d)(?:\.\d+)?'/.test(h)&&h.includes('window.__IFA_LF?window.__IFA_LF(e,t,r,n,o,')&&h.includes('window.__IFA_RATES=[i,s]')&&h.includes('F=(window.__IFA_LD=L.from,ZR(')&&h.includes("{k:'lq',"));t('phase-3 client embedded (v15.7: partners, weekly report, inbox, quote refs)',/const IFA=\{version:'15\.(?:[7-9]|[12]\d)(?:\.\d+)?'/.test(h)&&['async function mkPrt(','async function mkRep(','async function mkInbox(','async function lqRef(',"prt:mkPrt","'market.weekly':["].every(x=>h.includes(x)));const m=h.match(/const EKO_B64='([^']+)'/);t('china ecosystem dataset embedded',!!m);
+  if(m){const J=JSON.parse(zlib.gunzipSync(Buffer.from(m[1],'base64')).toString('utf8'));const c={};J.d.forEach(r=>c[r[1]]=(c[r[1]]||0)+1);
+   t('china ecosystem: 6981 entities / 12 layers',J.d.length===6981&&Object.keys(c).length===12&&c.FF===4507&&c.RT===666&&c.RG===81);
+   t('china ecosystem: verification 1129/5652/200, corridor 447',J.d.filter(r=>r[15]==='V').length===1129&&J.d.filter(r=>r[15]==='P').length===5652&&J.d.filter(r=>r[15]==='U').length===200&&J.d.filter(r=>r[17]).length===447);
+   t('china ecosystem: sources on every row, 7 corridor claims',J.d.every(r=>r[12].length>0)&&J.claims.length===7&&J.d.some(r=>r[0]==='IN-0104'))}}
+ srv.kill("SIGTERM");smtp.close();imapS.close();feedS.close();console.log(`\n${ok} passed, ${fail} failed`);fs.rmSync(dir,{recursive:true,force:true});process.exit(fail?1:0)})();

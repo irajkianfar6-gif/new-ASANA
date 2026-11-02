@@ -1,4 +1,56 @@
--live button{height:24px;padding:0 9px;border:0;border-radius:7px;background:var(--as-bg);color:var(--text);font-size:10.5px;cursor:pointer;box-shadow:0 0 0 1px var(--line2);flex:none}
+background:var(--accent);color:#fff;box-shadow:none}
+.ap-chip.off{color:var(--faint)}.ap-chip.lock{cursor:default}.ap-chip.lock input+i{opacity:.55}
+.ap-chip small{color:var(--faint);font-size:10px}
+.apx-pre .nt{display:flex;gap:10px;margin-top:14px;padding:10px 12px;border-radius:10px;background:var(--panel2);box-shadow:inset 0 0 0 1px var(--line);font-size:11.5px;line-height:1.85;color:var(--muted)}
+.apx-pre .nt svg{width:14px;height:14px;margin-top:4px;color:var(--faint)}
+.apx-pre>footer{display:flex;align-items:center;gap:8px;padding:12px 20px;border-top:1px solid var(--line);flex:none;flex-wrap:wrap}
+.apx-pre .go{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 14px;border:0;border-radius:9px;background:var(--ivory);color:var(--on-ivory);font-size:12px;font-weight:600;cursor:pointer;transition:opacity .15s,transform .12s}
+.apx-pre .go:hover{opacity:.9}.apx-pre .go:active{transform:scale(.97)}.apx-pre .go svg{width:12px;height:12px}
+.apx-pre .go kbd{color:inherit;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--on-ivory) 30%,transparent);margin:0}
+.apx-cn{height:34px;padding:0 12px;border:0;border-radius:9px;background:none;box-shadow:inset 0 0 0 1px var(--line2);color:var(--text);font-size:12px;cursor:pointer;transition:background .15s}.apx-cn:hover{background:var(--hover)}
+.apx-pre .est{font-size:11px;color:var(--faint)}
+.apx-pre .opt{display:flex;align-items:center;gap:14px;margin-inline-start:auto;font-size:11.5px;color:var(--muted)}
+.apx-pre .opt label{display:inline-flex;align-items:center;gap:6px;cursor:pointer}
+.apx-pre .opt select{height:28px;padding:0 8px;border:0;border-radius:7px;background:var(--panel2);box-shadow:inset 0 0 0 1px var(--line2);color:var(--text);font:11.5px var(--as-font)}
+@media (max-width:720px){.apx-pre .g,.ap-kpis{grid-template-columns:1fr 1fr}.apx-pre .opt{margin-inline-start:0;width:100%}.as-panel{width:calc(100vw - 24px)}.ap-hud{width:calc(100vw - 24px)}}
+@keyframes apRingP{0%,100%{opacity:1}50%{opacity:.5}}
+/* guards against generic app classes (.ic .n .ln .t .sub .tm .dots .skip .ar) */
+.ap-st li .ic{width:auto;font-size:inherit;text-align:initial}
+.ap-rt .n{font-family:var(--as-font);font-size:inherit;letter-spacing:0;color:var(--text);font-weight:400}
+.ap-rt .ln{width:auto;height:28px;border-radius:0;flex:initial}
+.apx-pre .t{color:var(--text);font-size:inherit;font-weight:400;transition:none}
+.ap-hd .sub{display:block;margin:0;gap:0}
+.ap-hd .tm{gap:0}
+.as-think .dots{margin:0}
+.ap-st li.skip{margin-top:0;height:auto;pointer-events:auto;font-size:12px}
+.as-sug .ar{animation:none!important}
+/* ---------- v15.13: autopilot red mode ---------- */
+@property --accent{syntax:'<color>';inherits:true;initial-value:#5e9fe8}
+@property --accent-soft{syntax:'<color>';inherits:true;initial-value:rgba(94,159,232,.14)}
+html{transition:--accent .7s var(--as-io),--accent-soft .7s var(--as-io)}
+html.ap-mode{--accent:#e5484d;--accent-soft:rgba(229,72,77,.16);--ap-red:#e5484d}
+html.ap-mode[data-theme=light]{--accent:#d93036;--accent-soft:#fdeaea;--ap-red:#d93036}
+html.ap-mode.ap-paused{--accent:#e0a84e;--accent-soft:rgba(224,168,78,.16)}
+html.ap-mode.ap-paused[data-theme=light]{--accent:#c27c0e;--accent-soft:#fdf1dc}
+html.ap-mode .as-fab{box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 55%,transparent),0 10px 30px -10px color-mix(in srgb,var(--accent) 60%,transparent)}
+html.ap-mode .ap-frame{box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--accent) 70%,transparent),inset 0 0 90px -30px color-mix(in srgb,var(--accent) 60%,transparent)}
+.ap-frame::before{content:'';position:absolute;left:0;right:0;top:0;height:2px;background:linear-gradient(90deg,transparent 0%,var(--accent) 50%,transparent 100%);background-size:50% 100%;background-repeat:no-repeat;animation:apScan 2.4s var(--as-io) infinite}
+.ap-frame.paused::before{animation:none;background:var(--accent);opacity:.6;background-size:100% 100%}
+@keyframes apScan{from{background-position:-60% 0}to{background-position:160% 0}}
+.ap-sweep{position:fixed;inset:0;z-index:116;pointer-events:none;background:radial-gradient(120% 90% at 50% 100%,rgba(229,72,77,.32) 0%,rgba(229,72,77,.12) 45%,transparent 75%);clip-path:circle(0% at 50% 100%);animation:apSweep 1s var(--as-io) forwards}
+.ap-sweep.off{background:radial-gradient(120% 90% at 50% 100%,color-mix(in srgb,var(--text) 10%,transparent),transparent 70%)}
+@keyframes apSweep{0%{clip-path:circle(0% at 50% 100%);opacity:1}55%{clip-path:circle(140% at 50% 100%);opacity:1}100%{clip-path:circle(140% at 50% 100%);opacity:0}}
+.ap-hud .ap-hd .tt b::after{content:'AUTO';font:700 9px/16px Inter,var(--as-font);letter-spacing:.08em;padding:0 6px;border-radius:5px;color:#fff;background:var(--accent);opacity:0;transform:scale(.8);transition:opacity .3s,transform .3s var(--as-sp)}
+html.ap-mode .ap-hud .ap-hd .tt b::after{opacity:1;transform:none}
+.ap-st li.flash{animation:apFlash 1.2s ease-out}@keyframes apFlash{0%,40%{background:var(--accent-soft)}100%{background:transparent}}
+/* chat panel live strip */
+.as-live{display:none;position:relative;align-items:center;gap:8px;margin:10px 14px 0;padding:0 6px 0 10px;padding-inline:10px 6px;height:34px;border-radius:9px;background:var(--accent-soft);color:var(--text);font-size:11px;overflow:hidden;flex:none}
+.as-live.on{display:flex;animation:asIn .3s var(--as-e)}
+.as-live .lv{position:relative;width:7px;height:7px;border-radius:50%;background:var(--accent);flex:none}.as-live .lv::after{content:'';position:absolute;inset:0;border-radius:50%;background:var(--accent);animation:asPing 1.6s var(--as-e) infinite}
+.as-live>span:nth-child(2){color:var(--accent);font-weight:600;white-space:nowrap}
+.as-live b{flex:1;min-width:0;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.as-live i{position:absolute;right:0;bottom:0;height:2px;width:var(--p);background:var(--accent);transition:width .6s var(--as-e)}
+.as-live button{height:24px;padding:0 9px;border:0;border-radius:7px;background:var(--as-bg);color:var(--text);font-size:10.5px;cursor:pointer;box-shadow:0 0 0 1px var(--line2);flex:none}
 /* ---------- v15.13: bottom live timeline ---------- */
 .ap-tl{position:fixed;z-index:119;bottom:16px;left:84px;right:calc(var(--nv-w,68px) + 16px);max-width:1180px;margin:0 auto;height:72px;display:flex;align-items:center;gap:18px;padding:0 16px;padding-inline:16px 10px;border-radius:16px;background:var(--as-bg);color:var(--text);box-shadow:var(--as-sh);font-family:var(--as-font);direction:rtl;
  animation:apTlIn .5s var(--as-e) both;transition:height .35s var(--as-e),box-shadow .4s}
